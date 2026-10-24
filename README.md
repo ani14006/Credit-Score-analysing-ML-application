@@ -66,7 +66,13 @@ cd frontend && npm run dev
 | `CREDIT_PREDICTIONS_DB` | `var/predictions.db` | SQLite file for prediction history |
 | `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | comma-separated allowed frontend origins |
 | `CREDIT_DATA_PATH` | `data/raw/german.data` | dataset file used by training |
+| `CREDIT_MAX_BODY_BYTES` | `16384` | request bodies above this size get HTTP 413 |
+| `CREDIT_STORE_HISTORY` | `true` | `false` stores no prediction history |
+| `CREDIT_HISTORY_RETENTION_DAYS` | `30` | history rows older than this are purged (`0` keeps them forever) |
 | `VITE_API_URL` (frontend) | `http://localhost:8000` | backend base URL; see `frontend/.env.example` |
+
+See [SECURITY.md](SECURITY.md) for the security model, data-retention policy and the controls
+required before any public deployment. The API has no authentication.
 
 ## Machine-learning pipeline
 
@@ -184,7 +190,7 @@ Validation rules:
 
 ## Tests
 
-`tests/` (39 tests) trains from the real dataset into a temporary directory and checks:
+`tests/` (47 tests) trains from the real dataset into a temporary directory and checks:
 
 - **Data loading**: dataset loads with 1,000 rows and a 700/300 label split; all codes decode.
 - **Saved metrics are real**: metrics on disk equal metrics recomputed from the reloaded
@@ -208,5 +214,8 @@ Validation rules:
 - **Endpoint contents**: `/metrics` and `/model-info` equal the artifact files.
 - **Bad requests**: an empty body, wrong types, non-JSON input and invalid `limit` values
   all return 422.
+- **Security** (`test_security.py`): errors don't disclose server paths, oversized and chunked
+  bodies get 413, CORS rejects unknown origins, history retention purges old rows, history can be
+  disabled, and SQL-like input in `limit` is rejected.
 - **History**: predictions persist in SQLite and are still there after the app restarts,
   checked through the API and by querying the database directly.

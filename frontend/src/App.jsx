@@ -5,7 +5,7 @@ import MetricsOverview from "./components/MetricsOverview.jsx";
 import ModelComparison from "./components/ModelComparison.jsx";
 import PredictionForm from "./components/PredictionForm.jsx";
 import PredictionResult from "./components/PredictionResult.jsx";
-import { humanize } from "./format.js";
+import { humanize, safeHttpUrl } from "./format.js";
 
 export default function App() {
   const [state, setState] = useState({ loading: true, error: null, health: null, metrics: null, info: null, schema: null });
@@ -89,7 +89,9 @@ export default function App() {
               <dt>Excluded features</dt><dd>{info.excluded_features.map(humanize).join(", ")}: kept out of the model as protected attributes (sex, national origin).</dd>
               <dt>Dataset</dt>
               <dd>
-                <a href={info.dataset.source} target="_blank" rel="noreferrer">{info.dataset.name}</a> ·
+                {safeHttpUrl(info.dataset.source)
+                  ? <a href={safeHttpUrl(info.dataset.source)} target="_blank" rel="noopener noreferrer">{info.dataset.name}</a>
+                  : info.dataset.name} ·
                 {" "}{info.dataset.license} · {info.dataset.n_rows} rows · train {info.split.n_train} / test {info.split.n_test}
               </dd>
               <dt>Software</dt><dd>scikit-learn {info.sklearn_version}, Python {info.python_version}</dd>

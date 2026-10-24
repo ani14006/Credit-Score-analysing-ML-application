@@ -34,5 +34,15 @@ export function humanize(value) {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
+// Only render http(s) links from API data; React 18 does not block javascript: URLs.
+export function safeHttpUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
 export const pct = (v, digits = 1) => `${(v * 100).toFixed(digits)}%`;
 export const num = (v, digits = 3) => Number(v).toFixed(digits);

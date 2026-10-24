@@ -10,8 +10,16 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.app.limits import BodySizeLimitMiddleware, max_body_bytes
 from backend.app.schemas import CustomerFeatures, PredictionResponse
-from backend.app.store import ModelStore, PredictionLog, artifact_dir, predictions_db_path
+from backend.app.store import (
+    ModelStore,
+    PredictionLog,
+    artifact_dir,
+    history_enabled,
+    history_retention_days,
+    predictions_db_path,
+)
 
 DISCLAIMER = (
     "probability_bad is the model's score for the 'bad credit risk' class of the 1994 German Credit "
@@ -24,7 +32,7 @@ DISCLAIMER = (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.store = ModelStore(artifact_dir()).load()
-    app.state.log = PredictionLog(predictions_db_path())
+    app.state.log = PredictionLog(predictions_db_path(), history_retention_days()) if history_enabled() else None
     yield
 
 
@@ -40,6 +48,8 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
+# Added last so it runs first: rejects oversized bodies before anything reads them.
+app.add_middleware(BodySizeLimitMiddleware, max_bytes=max_body_bytes())
 
 
 def _require_model():
@@ -75,10 +85,10 @@ def predict(customer: CustomerFeatures):
     store = _require_model()
     features = customer.model_dump()
     result = store.predict(features)
-    prediction_id = app.state.log.add(features, result)
+    prediction_id = app.state.log.add(features, result) if app.state.log else None
     return {**result, "prediction_id": prediction_id, "disclaimer": DISCLAIMER}
 
 
 @app.get("/predictions")
 def predictions(limit: int = Query(20, ge=1, le=200)):
-    return app.state.log.recent(limit)
+    return app.state.log.recent(limit) if app.state.log else []
