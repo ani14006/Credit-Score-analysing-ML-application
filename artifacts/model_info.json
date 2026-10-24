@@ -1,0 +1,151 @@
+{
+  "selected_model": "random_forest",
+  "algorithm": "RandomForestClassifier",
+  "decision_threshold": 0.36,
+  "selection_criterion": "Lowest mean misclassification cost on 5-fold stratified out-of-fold predictions of the training set, using the dataset's cost matrix (false negative = 5, false positive = 1). Decision threshold tuned the same way. Ties broken by CV ROC-AUC. The test set was not used for selection.",
+  "positive_class": "bad_credit_risk",
+  "class_labels": {
+    "0": "good_credit_risk",
+    "1": "bad_credit_risk"
+  },
+  "label_mapping": "Raw label 1 (good) -> 0 good_credit_risk; raw label 2 (bad) -> 1 bad_credit_risk",
+  "numeric_features": [
+    "duration_months",
+    "credit_amount",
+    "installment_rate_pct",
+    "residence_since",
+    "age_years",
+    "existing_credits",
+    "num_dependents"
+  ],
+  "categorical_features": [
+    "checking_status",
+    "credit_history",
+    "purpose",
+    "savings_status",
+    "employment_since",
+    "other_debtors",
+    "property",
+    "other_installment_plans",
+    "housing",
+    "job",
+    "telephone"
+  ],
+  "category_options": {
+    "checking_status": [
+      "0_to_200_dm",
+      "ge_200_dm_or_salary",
+      "lt_0_dm",
+      "no_checking_account"
+    ],
+    "credit_history": [
+      "all_paid_this_bank",
+      "critical_or_other_credits",
+      "existing_paid_duly",
+      "no_credits_or_all_paid",
+      "past_delay"
+    ],
+    "purpose": [
+      "business",
+      "car_new",
+      "car_used",
+      "domestic_appliances",
+      "education",
+      "furniture_equipment",
+      "others",
+      "radio_tv",
+      "repairs",
+      "retraining",
+      "vacation"
+    ],
+    "savings_status": [
+      "100_to_500_dm",
+      "500_to_1000_dm",
+      "ge_1000_dm",
+      "lt_100_dm",
+      "unknown_or_none"
+    ],
+    "employment_since": [
+      "1_to_4_years",
+      "4_to_7_years",
+      "ge_7_years",
+      "lt_1_year",
+      "unemployed"
+    ],
+    "other_debtors": [
+      "co_applicant",
+      "guarantor",
+      "none"
+    ],
+    "property": [
+      "car_or_other",
+      "real_estate",
+      "savings_agreement_or_life_insurance",
+      "unknown_or_none"
+    ],
+    "other_installment_plans": [
+      "bank",
+      "none",
+      "stores"
+    ],
+    "housing": [
+      "for_free",
+      "own",
+      "rent"
+    ],
+    "job": [
+      "management_self_employed_highly_qualified",
+      "skilled_employee",
+      "unemployed_unskilled_nonresident",
+      "unskilled_resident"
+    ],
+    "telephone": [
+      "none",
+      "yes_registered"
+    ]
+  },
+  "excluded_features": [
+    "personal_status_sex",
+    "foreign_worker"
+  ],
+  "feature_defaults": {
+    "duration_months": 18.0,
+    "credit_amount": 2317.0,
+    "installment_rate_pct": 3.0,
+    "residence_since": 3.0,
+    "age_years": 33.0,
+    "existing_credits": 1.0,
+    "num_dependents": 1.0,
+    "checking_status": "no_checking_account",
+    "credit_history": "existing_paid_duly",
+    "purpose": "radio_tv",
+    "savings_status": "lt_100_dm",
+    "employment_since": "1_to_4_years",
+    "other_debtors": "none",
+    "property": "car_or_other",
+    "other_installment_plans": "none",
+    "housing": "own",
+    "job": "skilled_employee",
+    "telephone": "none"
+  },
+  "dataset": {
+    "name": "Statlog (German Credit Data)",
+    "source": "https://archive.ics.uci.edu/dataset/144/statlog+german+credit+data",
+    "license": "CC BY 4.0",
+    "path": "data/raw/german.data",
+    "n_rows": 1000,
+    "bad_rate": 0.3
+  },
+  "split": {
+    "test_size": 0.2,
+    "stratified": true,
+    "random_state": 42,
+    "n_train": 800,
+    "n_test": 200
+  },
+  "class_imbalance_handling": "class_weight='balanced' + cost-based threshold tuning",
+  "probability_calibration": "Not calibrated. class_weight='balanced' re-weights the minority class, so predicted P(bad) overstates the observed bad rate (see metrics.json -> test.calibration). Treat the output as a risk score for ranking and thresholding, not as a literal default probability.",
+  "trained_at": "2026-10-24T05:35:55+00:00",
+  "sklearn_version": "1.7.2",
+  "python_version": "3.12.14"
+}
