@@ -1,8 +1,11 @@
 """Model artifact loading and prediction-history persistence."""
 
+import hashlib
+import hmac
 import json
 import logging
 import os
+import secrets
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
@@ -105,6 +108,26 @@ class ModelStore:
         }
 
 
+def new_access_token():
+    """Unguessable per-prediction capability token; only its SHA-256 is stored."""
+    return secrets.token_urlsafe(32)
+
+
+def hash_token(token):
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def connect(path):
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")  # agent tables cascade-delete with their prediction
+    return conn
+
+
+PUBLIC_COLUMNS = ("id, created_at, model_name, model_trained_at, features, probability_bad, "
+                  "predicted_class, decision_threshold")
+
+
 class PredictionLog:
     def __init__(self, path, retention_days=30):
         self.path = Path(path)
@@ -123,6 +146,9 @@ class PredictionLog:
                     decision_threshold REAL NOT NULL
                 )"""
             )
+            columns = {r["name"] for r in conn.execute("PRAGMA table_info(predictions)")}
+            if "token_hash" not in columns:  # databases created before access tokens existed
+                conn.execute("ALTER TABLE predictions ADD COLUMN token_hash TEXT")
         self.purge_expired()
 
     def purge_expired(self):
@@ -133,15 +159,14 @@ class PredictionLog:
             return conn.execute("DELETE FROM predictions WHERE created_at < ?", (cutoff,)).rowcount
 
     def _connect(self):
-        conn = sqlite3.connect(self.path)
-        conn.row_factory = sqlite3.Row
-        return conn
+        return connect(self.path)
 
-    def add(self, features, result):
+    def add(self, features, result, token_hash=None):
         with closing(self._connect()) as conn, conn:
             cur = conn.execute(
                 "INSERT INTO predictions (created_at, model_name, model_trained_at, features, "
-                "probability_bad, predicted_class, decision_threshold) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "probability_bad, predicted_class, decision_threshold, token_hash) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     datetime.now(timezone.utc).isoformat(timespec="seconds"),
                     result["model_name"],
@@ -150,6 +175,7 @@ class PredictionLog:
                     result["probability_bad"],
                     result["predicted_class"],
                     result["decision_threshold"],
+                    token_hash,
                 ),
             )
             row_id = cur.lastrowid
@@ -159,6 +185,32 @@ class PredictionLog:
     def recent(self, limit=20):
         with closing(self._connect()) as conn:
             rows = conn.execute(
-                "SELECT * FROM predictions ORDER BY id DESC LIMIT ?", (limit,)
+                f"SELECT {PUBLIC_COLUMNS} FROM predictions ORDER BY id DESC LIMIT ?", (limit,)
             ).fetchall()
-        return [{**dict(r), "features": json.loads(r["features"])} for r in rows]
+        return [_row(r) for r in rows]
+
+    def get_authorized(self, prediction_id, token):
+        """The prediction, only if `token` is the one issued for it; otherwise None."""
+        if not token:
+            return None
+        with closing(self._connect()) as conn:
+            row = conn.execute(
+                f"SELECT {PUBLIC_COLUMNS}, token_hash FROM predictions WHERE id = ?", (prediction_id,)
+            ).fetchone()
+        if row is None or row["token_hash"] is None:
+            return None
+        if not hmac.compare_digest(row["token_hash"], hash_token(token)):
+            return None
+        return _row(row)
+
+    def lookup(self, items):
+        """Predictions for which the caller holds the access token (missing or wrong tokens are skipped)."""
+        found = [self.get_authorized(i["id"], i["token"]) for i in items]
+        return sorted((r for r in found if r), key=lambda r: -r["id"])
+
+
+def _row(r):
+    d = dict(r)
+    d.pop("token_hash", None)
+    d["features"] = json.loads(d["features"])
+    return d

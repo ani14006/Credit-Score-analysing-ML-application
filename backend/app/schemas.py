@@ -42,8 +42,20 @@ class CustomerFeatures(BaseModel):
 assert set(CustomerFeatures.model_fields) == set(MODEL_FEATURES), "API schema drifted from model features"
 
 
+class PredictionRef(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: int = Field(ge=1)
+    token: str = Field(min_length=20, max_length=128)
+
+
+class PredictionLookup(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[PredictionRef] = Field(max_length=50)
+
+
 class PredictionResponse(BaseModel):
     prediction_id: int | None
+    access_token: str | None
     prediction: Literal["good_credit_risk", "bad_credit_risk"]
     predicted_class: int
     probability_bad: float

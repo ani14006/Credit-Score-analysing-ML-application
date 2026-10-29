@@ -1,20 +1,44 @@
 import { useCallback, useEffect, useState } from "react";
 import { API_URL, api } from "./api.js";
+import AgentPanel from "./components/AgentPanel.jsx";
 import History from "./components/History.jsx";
 import MetricsOverview from "./components/MetricsOverview.jsx";
 import ModelComparison from "./components/ModelComparison.jsx";
 import PredictionForm from "./components/PredictionForm.jsx";
 import PredictionResult from "./components/PredictionResult.jsx";
 import { humanize, safeHttpUrl } from "./format.js";
+import { mine } from "./mine.js";
+
+// A stored prediction (from /predictions/lookup) in the same shape as a /predict response.
+function fromHistory(row) {
+  return {
+    prediction_id: row.id,
+    prediction: row.predicted_class ? "bad_credit_risk" : "good_credit_risk",
+    predicted_class: row.predicted_class,
+    probability_bad: row.probability_bad,
+    probability_good: 1 - row.probability_bad,
+    decision_threshold: row.decision_threshold,
+    model_name: row.model_name,
+    model_trained_at: row.model_trained_at,
+    warnings: [],
+    disclaimer: `Reopened from your prediction history (scored ${new Date(row.created_at).toLocaleString()}).`,
+  };
+}
 
 export default function App() {
   const [state, setState] = useState({ loading: true, error: null, health: null, metrics: null, info: null, schema: null });
   const [prediction, setPrediction] = useState({ loading: false, result: null, error: null, fieldErrors: {} });
   const [history, setHistory] = useState({ rows: [], error: null });
+  const [agentStatus, setAgentStatus] = useState(null);
 
   const loadHistory = useCallback(() => {
-    api.predictions(10)
-      .then((rows) => setHistory({ rows, error: null }))
+    const items = mine.all().map(({ id, token }) => ({ id, token }));
+    if (items.length === 0) {
+      setHistory({ rows: [], error: null });
+      return;
+    }
+    api.lookupPredictions(items)
+      .then((rows) => setHistory({ rows: rows.slice(0, 10), error: null }))
       .catch((e) => setHistory({ rows: [], error: e.message }));
   }, []);
 
@@ -29,6 +53,8 @@ export default function App() {
         const [metrics, info, schema] = await Promise.all([api.metrics(), api.modelInfo(), api.schema()]);
         setState({ loading: false, error: null, health, metrics, info, schema });
         loadHistory();
+        api.agentStatus().then(setAgentStatus)
+          .catch((e) => setAgentStatus({ configured: false, message: `Agent status unavailable: ${e.message}` }));
       } catch (e) {
         setState({ loading: false, error: e.message, health: null });
       }
@@ -39,6 +65,7 @@ export default function App() {
     setPrediction({ loading: true, result: null, error: null, fieldErrors: {} });
     try {
       const result = await api.predict(features);
+      if (result.prediction_id && result.access_token) mine.add(result.prediction_id, result.access_token);
       setPrediction({ loading: false, result, error: null, fieldErrors: {} });
       loadHistory();
     } catch (e) {
@@ -75,9 +102,10 @@ export default function App() {
               loading={prediction.loading} serverErrors={prediction.fieldErrors} />
             <div className="stack">
               <PredictionResult {...prediction} />
-              <History {...history} />
+              <History {...history} onSelect={(row) => setPrediction({ loading: false, result: fromHistory(row), error: null, fieldErrors: {} })} />
             </div>
           </div>
+          <AgentPanel prediction={prediction.result} status={agentStatus} />
           <ModelComparison metrics={metrics} />
           <section className="card about">
             <h2>About this model</h2>

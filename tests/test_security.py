@@ -98,12 +98,47 @@ def test_history_can_be_disabled(env, sample_customer, tmp_path):
     env.setenv("CREDIT_PREDICTIONS_DB", str(tmp_path / "disabled.db"))
     with TestClient(app) as c:
         r = c.post("/predict", json=sample_customer)
-        assert r.status_code == 200 and r.json()["prediction_id"] is None
-        assert c.get("/predictions").json() == []
+        assert r.status_code == 200 and r.json()["prediction_id"] is None and r.json()["access_token"] is None
+        assert c.post("/predictions/lookup", json={"items": []}).json() == []
     assert not (tmp_path / "disabled.db").exists()
 
 
 def test_sql_injection_in_limit_is_rejected(env):
+    env.setenv("CREDIT_ADMIN_TOKEN", "operator-test-token-123456")
+    auth = {"Authorization": "Bearer operator-test-token-123456"}
     with TestClient(app) as c:
-        assert c.get("/predictions", params={"limit": "1; DROP TABLE predictions"}).status_code == 422
-        assert c.get("/predictions").status_code == 200
+        assert c.get("/predictions", params={"limit": "1; DROP TABLE predictions"}, headers=auth).status_code == 422
+        assert c.get("/predictions", headers=auth).status_code == 200
+
+
+def test_history_listing_requires_operator_token(env, sample_customer):
+    with TestClient(app) as c:
+        c.post("/predict", json=sample_customer)
+        disabled = c.get("/predictions")
+    assert disabled.status_code == 403 and "probability_bad" not in disabled.text
+    env.setenv("CREDIT_ADMIN_TOKEN", "operator-test-token-123456")
+    with TestClient(app) as c:
+        assert c.get("/predictions").status_code == 401
+        assert c.get("/predictions", headers={"Authorization": "Bearer wrong-token"}).status_code == 401
+        rows = c.get("/predictions", headers={"Authorization": "Bearer operator-test-token-123456"}).json()
+    assert rows and "token_hash" not in rows[0]
+
+
+def test_lookup_returns_only_predictions_with_matching_token(env, sample_customer):
+    with TestClient(app) as c:
+        a = c.post("/predict", json=sample_customer).json()
+        b = c.post("/predict", json={**sample_customer, "credit_amount": 9000}).json()
+        own = c.post("/predictions/lookup", json={"items": [{"id": a["prediction_id"], "token": a["access_token"]}]}).json()
+        forged = c.post("/predictions/lookup", json={"items": [{"id": b["prediction_id"], "token": a["access_token"]}]}).json()
+    assert [r["id"] for r in own] == [a["prediction_id"]]
+    assert forged == []
+    assert "token_hash" not in own[0] and "access_token" not in own[0]
+
+
+def test_only_token_hash_is_stored(env, sample_customer, tmp_path):
+    with TestClient(app) as c:
+        r = c.post("/predict", json=sample_customer).json()
+    with sqlite3.connect(tmp_path / "p.db") as conn:
+        stored = conn.execute("SELECT token_hash FROM predictions WHERE id = ?", (r["prediction_id"],)).fetchone()[0]
+    conn.close()
+    assert r["access_token"] not in stored and len(stored) == 64

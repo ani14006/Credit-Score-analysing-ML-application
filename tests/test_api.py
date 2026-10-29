@@ -87,7 +87,8 @@ def test_out_of_range_input_is_flagged(client, sample_customer):
 
 def test_prediction_history_is_persisted(client, sample_customer, tmp_path):
     first = client.post("/predict", json=sample_customer).json()
-    history = client.get("/predictions").json()
+    ref = {"id": first["prediction_id"], "token": first["access_token"]}
+    history = client.post("/predictions/lookup", json={"items": [ref]}).json()
     assert history[0]["id"] == first["prediction_id"]
     assert history[0]["probability_bad"] == pytest.approx(first["probability_bad"])
 
@@ -150,7 +151,8 @@ def test_history_survives_app_restart(trained, tmp_path, monkeypatch, sample_cus
     with TestClient(app) as c:
         saved = c.post("/predict", json=sample_customer).json()
     with TestClient(app) as c:  # new lifespan = backend restart
-        history = c.get("/predictions").json()
+        history = c.post("/predictions/lookup",
+                         json={"items": [{"id": saved["prediction_id"], "token": saved["access_token"]}]}).json()
     assert [r["id"] for r in history] == [saved["prediction_id"]]
     assert history[0]["probability_bad"] == pytest.approx(saved["probability_bad"])
     assert history[0]["features"] == sample_customer

@@ -26,11 +26,21 @@ credit-scoring/
 │   ├── metrics.json         test-set and CV metrics for both models, ROC points, confusion matrices
 │   └── model_info.json      selected algorithm, selection criterion, schema, dataset info
 ├── backend/app/
-│   ├── main.py              FastAPI app: /health /metrics /model-info /predict /predictions
+│   ├── main.py              FastAPI app: /health /metrics /model-info /predict /predictions[/lookup]
 │   ├── schemas.py           request validation (Pydantic), generated from ml/features.py
-│   └── store.py             artifact loading, inference, SQLite prediction log
-├── frontend/                React + Vite + Recharts dashboard
-├── tests/                   pytest suite (data, training, API)
+│   ├── store.py             artifact loading, inference, SQLite prediction log, access tokens
+│   ├── limits.py            request body size limit
+│   └── agent/               AI Financial Wellness Agent
+│       ├── routes.py        /agent/* endpoints (token-checked)
+│       ├── service.py       verified context -> LLM -> validated output -> SQLite
+│       ├── context.py       context builder, limitations, optional user-supplied details
+│       ├── explainability.py model sensitivity (what-if) analysis on the saved pipeline
+│       ├── prompts.py       fixed system prompt, output JSON schemas and validators
+│       ├── llm.py           Anthropic Claude provider (server-side key, timeouts, error mapping)
+│       ├── storage.py       sessions, conversation turns, plans, tasks
+│       └── ratelimit.py     per-client limit on LLM-calling requests
+├── frontend/                React + Vite + Recharts dashboard (src/components/AgentPanel.jsx)
+├── tests/                   pytest suite (data, training, leakage, API, security, agent)
 ├── requirements.txt
 └── .env.example
 ```
@@ -69,10 +79,19 @@ cd frontend && npm run dev
 | `CREDIT_MAX_BODY_BYTES` | `16384` | request bodies above this size get HTTP 413 |
 | `CREDIT_STORE_HISTORY` | `true` | `false` stores no prediction history |
 | `CREDIT_HISTORY_RETENTION_DAYS` | `30` | history rows older than this are purged (`0` keeps them forever) |
+| `CREDIT_AGENT_PROVIDER` | *(auto)* | `gemini` or `anthropic`; unset = whichever key is present (Anthropic first) |
+| `GEMINI_API_KEY` | *(unset)* | Google Gemini key; backend only (environment or git-ignored `.env`) |
+| `GEMINI_MODEL` | `gemini-3.5-flash` | Gemini model used by the agent |
+| `ANTHROPIC_API_KEY` | *(unset)* | Anthropic key; backend only |
+| `CREDIT_AGENT_MODEL` | `claude-opus-5-5` | Claude model used when the provider is `anthropic` |
+| `CREDIT_AGENT_TIMEOUT_SECONDS` | `90` | per-request LLM timeout (the SDK retries twice) |
+| `CREDIT_AGENT_RATE_LIMIT_PER_MINUTE` | `10` | LLM-calling agent requests per client IP per minute |
+| `CREDIT_ADMIN_TOKEN` | *(unset)* | operator bearer token for `GET /predictions`; unset = listing disabled |
 | `VITE_API_URL` (frontend) | `http://localhost:8000` | backend base URL; see `frontend/.env.example` |
 
 See [SECURITY.md](SECURITY.md) for the security model, data-retention policy and the controls
-required before any public deployment. The API has no authentication.
+required before any public deployment. There are no user accounts: each stored prediction (and
+its agent session) can only be read with the access token returned when it was made.
 
 ## Machine-learning pipeline
 
@@ -147,8 +166,30 @@ are not implemented.
 | GET | `/health` | `{status, model_loaded, model_name, error}`, always 200 |
 | GET | `/metrics` | contents of `metrics.json`; 503 if artifacts are missing |
 | GET | `/model-info` | contents of `model_info.json`; 503 if artifacts are missing |
-| POST | `/predict` | validates the applicant, runs the saved pipeline, logs and returns the prediction |
-| GET | `/predictions?limit=20` | prediction history persisted in SQLite |
+| POST | `/predict` | validates the applicant, runs the saved pipeline, stores and returns the prediction plus a one-time `access_token` |
+| POST | `/predictions/lookup` | `{"items": [{"id", "token"}]}` → the caller's own stored predictions (wrong tokens are skipped) |
+| GET | `/predictions?limit=20` | operator listing of all predictions; needs `Authorization: Bearer $CREDIT_ADMIN_TOKEN` (403 when unset) |
+| GET | `/agent/status` | whether the LLM is configured, and which model |
+| POST | `/agent/text` | **simple text API**: `{prediction_id, question?}` + `X-Prediction-Token` → `text/plain` answer (no session, nothing stored) |
+| POST | `/agent/sessions` | `{prediction_id, user_context?}` + `X-Prediction-Token` → AI explanation of that stored prediction |
+| GET | `/agent/sessions/{id}` | explanation, evidence, conversation and latest plan |
+| POST | `/agent/sessions/{id}/messages` | `{question}` → follow-up answer using the session's context |
+| POST | `/agent/sessions/{id}/plan` | `{horizon_days: 30\|60\|90, goals?}` → personalised plan, saved with tasks |
+| GET | `/agent/sessions/{id}/plan` | latest saved plan with progress |
+| PATCH | `/agent/sessions/{id}/plan/tasks/{task_id}` | `{done}` → mark a task complete or not |
+
+Simple text API example (use the `prediction_id` and `access_token` returned by `/predict`):
+
+```bash
+curl -X POST localhost:8000/agent/text -H 'Content-Type: application/json' \
+  -H "X-Prediction-Token: $TOKEN" -d '{"prediction_id": 1, "question": "What should I focus on first?"}'
+```
+
+Leave out `question` to get a plain-text explanation of the prediction. Errors come back as plain
+text with the usual status codes (404, 429, 503, 504).
+
+All `/agent/*` session routes require the `X-Prediction-Token` header of the session's prediction;
+an unknown session and a wrong token both return 404.
 
 Example:
 
@@ -163,7 +204,8 @@ curl -X POST localhost:8000/predict -H 'Content-Type: application/json' -d '{
 ```
 
 The response includes `prediction`, `predicted_class`, `probability_bad`,
-`probability_good`, `decision_threshold`, `model_name`, `warnings` and `prediction_id`.
+`probability_good`, `decision_threshold`, `model_name`, `warnings`, `prediction_id` and
+`access_token`. Only a SHA-256 hash of the token is stored.
 
 Validation rules:
 - All 18 fields are required, and unknown fields are rejected. Sending
@@ -183,14 +225,89 @@ Validation rules:
   - prefilled with training-set medians and modes;
   - server-side 422 errors are shown on the matching field.
 - **Prediction result**: class, probability, and a meter marking the threshold.
-- **Persisted history** read from `/predictions`.
+- **Your prediction history**: predictions made in this browser, read through
+  `/predictions/lookup` with the tokens kept in this browser's local storage. **Open** reloads a
+  past prediction and its agent session.
+- **AI Financial Wellness Agent**: explanation, evidence, improvement plan and chat (below).
 - **Model comparison**: table, grouped metric bars, ROC curves and confusion matrices, all
   rendered from `/metrics`.
 - **Light and dark mode** following the OS setting, and a responsive layout.
 
+## AI Financial Wellness Agent
+
+An LLM (Google Gemini `gemini-3.5-flash`, or Anthropic Claude `claude-opus-5-5`, chosen by
+`CREDIT_AGENT_PROVIDER`) explains a stored prediction, builds an
+improvement plan and answers follow-up questions. It is connected to the real model and database;
+it never changes the prediction.
+
+```
+Browser ── POST /agent/sessions {prediction_id} + X-Prediction-Token ──▶ FastAPI
+                                                   │ load prediction row from SQLite (token checked)
+                                                   │ build verified context:
+                                                   │   stored label / score / threshold, submitted features,
+                                                   │   sensitivity analysis (re-runs the saved pipeline),
+                                                   │   test metrics, limitations, what is NOT collected,
+                                                   │   user-supplied details (marked unverified)
+                                                   ▼
+                     Gemini or Claude API via the official SDK (key stays on the server)
+                                                   │ JSON-schema output, validated with Pydantic
+                                                   ▼
+                     SQLite: agent_sessions / agent_messages / agent_plans / agent_plan_tasks
+```
+
+**What the agent produces.**
+- **Explanation:** what the prediction means, factors to review, positive habits, risks and
+  missing information, prioritised steps, an action plan, and the uncertainty and limitations.
+  Every point is tagged *observed*, *model analysis*, *you reported*, *general guidance* or
+  *assumption*.
+- **Plan:** a 30-, 60- or 90-day plan of tasks. Each task has a week, a target date, a priority
+  and why it matters, plus a checkbox; progress is saved.
+- **Follow-up chat:** each answer sees the same verified context, the explanation, the earlier
+  questions and the current plan.
+
+**Feature-level explainability.** The Random Forest has no per-prediction coefficients, so
+`explainability.py` re-runs the saved pipeline with one input changed at a time.
+- It is labelled as model sensitivity, not causation.
+- It only tests financially sensible changes: smaller or shorter loans, fewer credits, higher
+  balances, no other instalment plans.
+- In the 1994 data, "no checking account" and "unknown savings" look low-risk. These are never
+  suggested, and both the agent and the UI say so.
+
+**Safeguards.**
+- **Prediction values come from the server.** The agent reads label, score and threshold from
+  the database. A request that tries to supply its own probability is rejected (422).
+- **Fixed system prompt** covering:
+  - no invented salary, balances, limits or bureau scores, and no CIBIL/FICO equivalence;
+  - an uncalibrated-score warning;
+  - no borrowing-more advice and no promised outcomes;
+  - education, not professional advice;
+  - user text treated as data, not instructions.
+- **No tools.** The LLM can't run commands, query the database or touch model files.
+- **Failures are never papered over.** A timeout, provider error, refusal, cut-off or invalid
+  JSON returns an error (502/503/504) and nothing is stored; no fallback text is fabricated. A
+  missing `ANTHROPIC_API_KEY` returns a clear 503, and the UI shows a configuration error.
+- **Limits:**
+  - 90-second timeout per LLM request;
+  - 10 LLM requests per minute per client IP;
+  - 40 questions per session;
+  - 16 KiB request bodies.
+- **Privacy:**
+  - the key is never sent to the browser (tested against the built bundle);
+  - sessions are token-scoped and unguessable;
+  - agent data is deleted together with its prediction by the 30-day retention purge;
+  - optional details are sent to Anthropic only when you choose to add them.
+
+**Enable it.**
+```bash
+cp .env.example .env               # .env is git-ignored
+# edit .env: CREDIT_AGENT_PROVIDER=gemini and GEMINI_API_KEY=...  (or anthropic + ANTHROPIC_API_KEY)
+.venv/bin/uvicorn backend.app.main:app --port 8000
+```
+
 ## Tests
 
-`tests/` (47 tests) trains from the real dataset into a temporary directory and checks:
+`tests/` (108 tests: 107 run offline, plus 1 opt-in live LLM test) trains from the real dataset into a
+temporary directory and checks:
 
 - **Data loading**: dataset loads with 1,000 rows and a 700/300 label split; all codes decode.
 - **Saved metrics are real**: metrics on disk equal metrics recomputed from the reloaded
@@ -219,3 +336,24 @@ Validation rules:
   disabled, and SQL-like input in `limit` is rejected.
 - **History**: predictions persist in SQLite and are still there after the app restarts,
   checked through the API and by querying the database directly.
+
+- **AI agent** (`test_agent.py`). These tests use a **mocked LLM**: a recording test double that
+  shows what the backend sends. They cover:
+  - the agent receives the real model prediction (checked against `predict_proba`);
+  - the provider is invoked with the fixed prompt and schema;
+  - user-supplied details are passed and labelled unverified;
+  - follow-ups replay the same context and earlier turns;
+  - a missing key returns 503; provider errors (timeout, connection, auth, rate limit, 5xx,
+    refusal, cut-off, bad JSON) return errors and store nothing;
+  - the stored prediction is byte-identical after the agent runs;
+  - plans differ with each user's context, and their tasks save, update and survive a restart;
+  - another prediction's token gets 404; rate limit 429; cascade deletion on purge.
+- **Credentials** (`test_frontend_secrets.py`): the frontend source never references LLM
+  credentials, and a production build made with a decoy key in the environment doesn't contain it.
+- **Gemini provider** (`test_agent.py`, mocked SDK): request shape, role mapping, JSON schema,
+  error mapping (bad key, 403, 404 model, 429, 503, 504, timeout), and responses that are
+  blocked, cut off or empty. Provider-selection logic is tested too.
+- **Live LLM** (`test_agent_live.py`): real calls for an explanation, a follow-up, a plan and
+  `/agent/text`. Excluded from normal runs; run it with `.venv/bin/python -m pytest -m live -s`.
+  The live run against Gemini returned a real explanation and follow-up, then one Gemini 503
+  ("high demand") on the plan. Rerun through the running app, all four calls succeeded.

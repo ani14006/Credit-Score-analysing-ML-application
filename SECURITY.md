@@ -16,15 +16,24 @@ controls listed under *Before deploying publicly*.
 | Parameterised SQL only | `backend/app/store.py` |
 | Errors name files only, never server paths or exception text; details go to the server log | `backend/app/store.py` |
 | History retention: rows older than 30 days are purged; history can be switched off | `CREDIT_HISTORY_RETENTION_DAYS`, `CREDIT_STORE_HISTORY` |
+| Per-prediction access tokens for history and agent sessions; operator token for the full listing | `backend/app/store.py`, `backend/app/main.py` |
+| LLM key read only by the backend (env or git-ignored `.env`); never sent to the browser | `backend/app/agent/llm.py`, `tests/test_frontend_secrets.py` |
+| Agent: no tools, fixed system prompt, schema-validated output, nothing stored on provider failure, timeouts, rate limit | `backend/app/agent/` |
+| Agent data (sessions, messages, plans) is cascade-deleted with its prediction by the retention purge | `backend/app/agent/storage.py` |
 | No app-level logging of applicant inputs (the uvicorn access log records method and path only) | — |
 | Frontend renders API text through React escaping; links from API data must be http(s) | `frontend/src/format.js` |
 
 ## Before deploying publicly (not implemented)
 
-* **Authentication and authorisation.** No endpoint requires authentication. `GET /predictions`
-  returns stored applicant inputs to anyone who can reach the API. Put the API behind an
-  authenticating reverse proxy or gateway, or disable history (`CREDIT_STORE_HISTORY=false`).
+* **Authentication and authorisation.** There are no user accounts. Stored predictions and agent
+  sessions are protected by unguessable per-prediction access tokens (only their SHA-256 hash is
+  stored), and `GET /predictions` (all rows) requires the operator token `CREDIT_ADMIN_TOKEN`.
+  Tokens live in the browser's local storage, so anyone with access to that browser profile can
+  read its predictions. For multi-user deployments put the API behind real authentication.
   Client-side validation in the frontend is a usability feature, not a security control.
+* **LLM costs and abuse.** The built-in agent rate limit is per process and per client IP. Behind a
+  proxy every client shares the proxy's IP, so enforce per-user limits and spend caps at the gateway
+  and in the Anthropic console.
 * **Rate limiting.** Each `/predict` call runs a 500-tree Random Forest. Rate-limit at the proxy.
 * **TLS** termination at the proxy, plus a `CORS_ORIGINS` value listing only the real frontend origin.
 * **Production frontend.** Serve `npm run build` output (`frontend/dist`) from a static host.
@@ -40,6 +49,10 @@ models. Treat any change to `artifacts/model.joblib` in a pull request as a code
 regenerate it yourself with `python -m ml.train` rather than trusting a submitted binary.
 
 ## Data
+
+Agent requests send the stored prediction's features, model output and any details the user chose
+to add to Anthropic's API for processing. Users should not enter names, account numbers or other
+identifiers in the free-text fields.
 
 `data/raw/german.data` is the public UCI Statlog German Credit dataset (CC BY 4.0). It contains
 coded attributes only: no names, identifiers or contact details. Do not commit real customer

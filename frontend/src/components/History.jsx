@@ -1,19 +1,22 @@
 import { pct } from "../format.js";
 
-export default function History({ rows, error }) {
+export default function History({ rows, error, onSelect }) {
   return (
     <section className="card">
       <div className="card-head">
-        <h2>Prediction history</h2>
-        <p className="muted">Persisted by the backend in SQLite (<code>GET /predictions</code>). Most recent 10.</p>
+        <h2>Your prediction history</h2>
+        <p className="muted">
+          Stored by the backend in SQLite and readable only with the access token issued to this browser
+          (<code>POST /predictions/lookup</code>). Kept for 30 days. Most recent 10.
+        </p>
       </div>
       {error && <div className="banner error">{error}</div>}
-      {!error && rows.length === 0 && <p className="muted">No predictions stored yet.</p>}
+      {!error && rows.length === 0 && <p className="muted">No predictions from this browser yet.</p>}
       {rows.length > 0 && (
         <div className="table-wrap">
           <table>
             <thead>
-              <tr><th>#</th><th>Time</th><th>Amount</th><th>Term</th><th>P(bad)</th><th>Result</th></tr>
+              <tr><th>#</th><th>Time</th><th>Amount</th><th>Term</th><th>P(bad)</th><th>Result</th><th /></tr>
             </thead>
             <tbody>
               {rows.map((r) => (
@@ -28,6 +31,7 @@ export default function History({ rows, error }) {
                       {r.predicted_class ? "✕ Bad" : "✓ Good"}
                     </span>
                   </td>
+                  <td><button type="button" className="link-button" onClick={() => onSelect(r)}>Open</button></td>
                 </tr>
               ))}
             </tbody>

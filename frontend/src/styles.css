@@ -133,3 +133,62 @@ tr.selected td { background: var(--selected-row); }
 .cm-cell { display: grid; place-items: center; padding: 14px 6px; border-radius: 4px; text-align: center; }
 .cm-cell strong { font-size: 1.35rem; }
 .cm-cell span { font-size: 0.7rem; opacity: 0.85; }
+
+/* AI Financial Wellness Agent */
+.agent-title-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.agent .banner { margin-bottom: 12px; }
+.agent-start { display: grid; gap: 12px; justify-items: start; }
+.agent-section { border-top: 1px solid var(--grid); padding-top: 18px; margin-top: 18px; }
+.agent-section > h3 { margin: 0 0 12px; font-size: 1rem; }
+.agent-headline { font-size: 1.05rem; font-weight: 650; margin: 0 0 6px; }
+.explanation p { line-height: 1.5; margin: 6px 0; }
+.agent-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-top: 12px; }
+.agent-block { margin-top: 14px; min-width: 0; }
+.agent-block h4, .evidence h4, .plan-week h4 { margin: 0 0 8px; font-size: 0.85rem; color: var(--text-secondary); }
+.points, .steps, .tasks { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
+.steps { counter-reset: step; }
+.points li, .steps li { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.points p, .steps p { margin: 4px 0 0; font-size: 0.88rem; }
+.point-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.basis { font-size: 0.68rem; font-weight: 600; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-secondary); white-space: nowrap; }
+.basis-observed { border-color: var(--series-1); }
+.basis-model_analysis { border-color: var(--series-2); }
+.basis-user_reported, .basis-assumption { border-style: dashed; }
+.prio { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-secondary); }
+.prio-high { color: var(--text); }
+.small { font-size: 0.78rem; }
+.evidence, .context-form { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-top: 14px; }
+.evidence summary, .context-form summary { cursor: pointer; font-size: 0.85rem; font-weight: 600; }
+.evidence-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 12px; }
+.evidence-grid .wide, .field.wide { grid-column: 1 / -1; }
+.evidence ul { padding-left: 18px; margin: 0 0 10px; }
+.evidence td { white-space: normal; }
+.context-form { width: 100%; }
+.context-form .form-grid { margin-top: 10px; }
+.field textarea, .ask textarea { font: inherit; font-size: 0.9rem; color: var(--text); background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; width: 100%; resize: vertical; }
+.link-button { background: none; border: none; color: var(--accent); padding: 0 0 0 8px; font-size: inherit; font-weight: 600; cursor: pointer; }
+.plan-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.plan-controls .grow { flex: 1 1 240px; }
+.plan { margin-top: 14px; }
+.plan-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center; }
+.progress { display: grid; gap: 4px; min-width: 200px; font-size: 0.78rem; color: var(--text-secondary); }
+.progress-bar { height: 8px; background: var(--grid); border-radius: 4px; overflow: hidden; }
+.progress-bar div { height: 100%; background: var(--good); border-radius: 4px; transition: width 0.2s; }
+.plan-week { margin-top: 14px; }
+.tasks li { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.tasks li.done { opacity: 0.65; }
+.tasks li.done strong { text-decoration: line-through; }
+.task { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; font-size: 0.88rem; }
+.task input { margin-top: 3px; width: 16px; height: 16px; flex: none; }
+.task-text { display: block; margin-top: 4px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.chip { background: transparent; color: var(--text); border: 1px solid var(--border); border-radius: 999px; padding: 5px 10px; font-size: 0.78rem; font-weight: 500; }
+.chat { display: grid; gap: 10px; margin-bottom: 12px; }
+.bubble { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; max-width: 760px; font-size: 0.88rem; line-height: 1.5; }
+.bubble.user { justify-self: end; background: var(--selected-row); }
+.bubble p { margin: 4px 0; white-space: pre-wrap; }
+.bubble ul { margin: 4px 0; padding-left: 18px; }
+.bubble-role { font-size: 0.7rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.ask { display: flex; gap: 8px; align-items: flex-end; }
+.ask textarea { flex: 1; }
+@media (max-width: 600px) { .ask { flex-direction: column; align-items: stretch; } }

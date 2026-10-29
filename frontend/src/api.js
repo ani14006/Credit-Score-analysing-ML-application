@@ -31,11 +31,28 @@ async function request(path, options = {}) {
   return body;
 }
 
+const withToken = (token, options = {}) => ({ ...options, headers: { "X-Prediction-Token": token } });
+const json = (method, body) => ({ method, body: JSON.stringify(body) });
+
 export const api = {
   health: () => request("/health"),
   metrics: () => request("/metrics"),
   modelInfo: () => request("/model-info"),
   schema: () => request("/openapi.json").then((s) => s.components.schemas.CustomerFeatures),
-  predict: (features) => request("/predict", { method: "POST", body: JSON.stringify(features) }),
-  predictions: (limit = 10) => request(`/predictions?limit=${limit}`),
+  predict: (features) => request("/predict", json("POST", features)),
+  // Only predictions this browser created (it holds their access tokens) can be looked up.
+  lookupPredictions: (items) => request("/predictions/lookup", json("POST", { items })),
+
+  agentStatus: () => request("/agent/status"),
+  startAgent: (predictionId, token, userContext) =>
+    request("/agent/sessions", withToken(token, json("POST", { prediction_id: predictionId, user_context: userContext }))),
+  getAgentSession: (sessionId, token) => request(`/agent/sessions/${encodeURIComponent(sessionId)}`, withToken(token)),
+  askAgent: (sessionId, token, question) =>
+    request(`/agent/sessions/${encodeURIComponent(sessionId)}/messages`, withToken(token, json("POST", { question }))),
+  createPlan: (sessionId, token, horizonDays, goals) =>
+    request(`/agent/sessions/${encodeURIComponent(sessionId)}/plan`,
+      withToken(token, json("POST", { horizon_days: horizonDays, goals: goals || null }))),
+  updateTask: (sessionId, token, taskId, done) =>
+    request(`/agent/sessions/${encodeURIComponent(sessionId)}/plan/tasks/${taskId}`,
+      withToken(token, json("PATCH", { done }))),
 };
